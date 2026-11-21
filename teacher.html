@@ -1,0 +1,192 @@
+<!doctype html><html lang="uz"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>O'qituvchi</title><link rel="stylesheet" href="style.css"></head>
+<body><main>
+<section id="reg">
+  <h1>O'qituvchi</h1>
+  <input id="fn" placeholder="Ism"><input id="ln" placeholder="Familiya"><input id="age" type="number" inputmode="numeric" placeholder="Yosh">
+  <button id="regGo">Davom etish</button><p id="e1" class="warn"></p>
+</section>
+<section id="stopic" class="hide">
+  <h2 id="hello"></h2>
+  <input id="tname" placeholder="Mavzu nomi">
+  <textarea id="txt" placeholder="Testni shu yerga yopishtiring:&#10;&#10;1. Poytaxt qaysi?&#10;A) Samarqand&#10;B) Toshkent *&#10;C) Buxoro&#10;D) Xiva&#10;&#10;2. Keyingi savol...&#10;&#10;To'g'ri javob * belgisi yoki &quot;Javob: B&quot; qatori bilan ko'rsatiladi."></textarea>
+  <button id="parse">Savollarni o'qish</button>
+  <p id="pcount"></p><div id="preview"></div>
+  <button id="toGame" class="hide">O'yin tanlashga o'tish</button>
+</section>
+<section id="game" class="hide">
+  <h2>O'yinni tanlang</h2>
+  <div class="grid" id="games"></div>
+  <p>Har savol uchun vaqt (soniya):</p><input id="time" type="number" value="20" min="5" max="60">
+  <p id="e2" class="warn"></p>
+</section>
+<section id="lobby" class="hide">
+  <h2>PIN-kod</h2><div class="pin" id="pin"></div>
+  <p style="text-align:center">Talabalar <b>/student.html</b> sahifasiga kirib PIN kiritadi</p>
+  <p id="tnote" style="text-align:center"></p>
+  <div class="chips" id="players"></div>
+  <button id="start">Boshlash</button>
+</section>
+<section id="play" class="hide">
+  <div class="big" id="timer"></div><h2 id="qtext"></h2>
+  <p id="ans" style="text-align:center"></p>
+  <div class="grid" id="opts"></div>
+  <button class="sec" id="skip">Javoblarni yopish</button>
+</section>
+<section id="res" class="hide">
+  <h2>Javoblar</h2><div id="bars"></div>
+  <h2>Reyting</h2><div id="board"></div><div id="teams"></div><div id="extra"></div>
+  <button id="next">Keyingi savol</button>
+</section>
+<section id="end" class="hide">
+  <h1>Yakuniy natija</h1><div id="fboard"></div><div id="fteams"></div><div id="fextra"></div>
+</section>
+</main>
+<script src="/socket.io/socket.io.js"></script>
+<script src="parser.js"></script>
+<script>
+const $ = id => document.getElementById(id), socket = io();
+const show = id => ['reg','stopic','game','lobby','play','res','end'].forEach(s => $(s).classList.toggle('hide', s !== id));
+const el = (t, txt, cls) => { const e = document.createElement(t); if (txt != null) e.textContent = txt; if (cls) e.className = cls; return e; };
+const SH = i => el('span', null, 'shape sh' + i), LET = 'ABCD';
+let me = null, quiz = [], curMode = 'solo', tick;
+try { me = JSON.parse(localStorage.teacher || 'null'); } catch (e) {}
+
+function afterReg() { $('hello').textContent = 'Salom, ' + me.name + '! Mavzu va testni kiriting'; show('stopic'); }
+me ? afterReg() : show('reg');
+$('regGo').onclick = () => {
+  const name = $('fn').value.trim(), surname = $('ln').value.trim(), age = +$('age').value;
+  if (!name || !surname || !(age >= 10 && age <= 100)) { $('e1').textContent = 'Ism, familiya va yoshni to\'g\'ri kiriting'; return; }
+  me = { name, surname, age }; localStorage.teacher = JSON.stringify(me); afterReg();
+};
+
+$('txt').value = localStorage.txt || ''; $('tname').value = localStorage.tname || '';
+function preview() {
+  const box = $('preview'); box.textContent = '';
+  quiz.forEach((q, qi) => {
+    const d = el('div', null, 'card'); d.append(el('b', (qi + 1) + '. ' + q.text));
+    q.options.forEach((t, i) => {
+      const r = el('div', null, 'bar opt c' + i); r.append(SH(i), el('span', LET[i] + ') ' + t + (q.correct === i ? '  ✓' : '')));
+      r.onclick = () => { q.correct = i; preview(); }; d.append(r);
+    });
+    if (q.correct < 0) d.append(el('div', "To'g'ri javobni bosib belgilang", 'warn'));
+    box.append(d);
+  });
+  $('toGame').classList.toggle('hide', !quiz.length);
+}
+$('parse').onclick = () => {
+  localStorage.txt = $('txt').value; localStorage.tname = $('tname').value;
+  quiz = parseTest($('txt').value);
+  $('pcount').textContent = quiz.length ? quiz.length + ' ta savol topildi. Javoblar to\'g\'rimi, tekshiring (xato bo\'lsa to\'g\'ri variantni bosing).' : 'Savol topilmadi. Namunadagi shaklda yozing.';
+  preview();
+};
+
+const GAMES = [
+  ['classic', 'Klassik', 0, 'Tezlik va aniqlik'],
+  ['accuracy', 'Aniqlik', 0, "Faqat to'g'ri javob, tezlik muhim emas"],
+  ['team', 'Jamoaviy musobaqa', 1, "Guruhlar balli yig'iladi"],
+  ['tower', 'Minora', 1, "To'g'ri javob = bir g'isht"],
+  ['land', 'Hudud', 1, "To'g'ri javob = bir katak"],
+  ['treasure', 'Xazina', 0, "To'g'ri javobdan keyin tangalarni tez bos"],
+  ['pyramid', 'Piramida', 1, "Guruh cho'qqiga chiqadi"],
+  ['sub', 'Suv osti', 0, "Hamma birga: yoqilg'i yetsa kema yetadi"],
+  ['vote', 'Ovoz berish', 0, "Sinf ovozi: ko'pchilik javobi hisoblanadi"],
+  ['jumble', 'Tartibga solish', 0, "Variantlarni to'g'ri tartibda bos (testda variantlarni to'g'ri tartibda yozing)"]
+];
+$('toGame').onclick = () => show('game');
+GAMES.forEach(([id, name, team, info]) => {
+  const w = el('div'); const b = el('button', name); b.onclick = () => create(id, team);
+  const s = el('small', info); s.style.cssText = 'display:block;text-align:center;opacity:.85'; w.append(b, s); $('games').append(w);
+});
+function create(game, team) {
+  if (game !== 'jumble' && quiz.some(q => q.correct < 0)) { $('e2').textContent = "Avval hamma savolda to'g'ri javobni belgilang (orqaga qayting)"; return; }
+  const time = Math.min(60, Math.max(5, +$('time').value || 20));
+  socket.emit('host:create', {
+    game, topic: $('tname').value.trim(),
+    questions: quiz.map(q => ({ text: q.text, options: q.options, correct: Math.max(0, q.correct), time }))
+  }, r => {
+    if (r.error) { $('e2').textContent = r.error; return; }
+    $('pin').textContent = r.pin;
+    $('tnote').textContent = team ? "Guruhlar (1-4) o'yin boshlanganda avtomatik taqsimlanadi" : '';
+    show('lobby');
+  });
+}
+
+socket.on('lobby', ({ players }) => {
+  const box = $('players'); box.textContent = '';
+  players.forEach(p => box.append(el('span', p.name)));
+});
+$('start').onclick = () => socket.emit('host:start');
+
+socket.on('question', q => {
+  show('play');
+  $('qtext').textContent = (q.i + 1) + '/' + q.total + '. ' + q.text + (q.jumble ? " (to'g'ri tartibni toping)" : '');
+  $('ans').textContent = 'Javoblar: 0'; $('opts').textContent = '';
+  q.options.forEach((t, i) => { const c = el('div', null, 'card c' + i); c.append(SH(i), el('span', LET[i] + ') ' + t)); $('opts').append(c); });
+  let left = q.time; $('timer').textContent = left; clearInterval(tick);
+  tick = setInterval(() => { left--; $('timer').textContent = Math.max(left, 0); if (left <= 0) clearInterval(tick); }, 1000);
+});
+socket.on('answered', n => $('ans').textContent = 'Javoblar: ' + n);
+$('skip').onclick = () => socket.emit('host:skip');
+
+function list(box, rows) {
+  box.textContent = '';
+  rows.forEach((r, i) => { const d = el('div', null, 'row'); d.append(el('span', (i + 1) + '. ' + r.name), el('b', r.score)); box.append(d); });
+}
+function teamsView(box, t) {
+  box.textContent = ''; if (!t) return;
+  box.append(el('h2', 'Guruhlar'));
+  [...t].sort((a, b) => b.score - a.score).forEach(x => {
+    const d = el('div', null, 'row'); d.append(el('span', x.name + ' (' + x.count + ' kishi)'), el('b', x.score)); box.append(d);
+  });
+}
+function drawExtra(box, x, fin) {
+  box.textContent = ''; if (!x) return;
+  if (x.type === 'tower') {
+    box.append(el('h2', 'Minoralar'));
+    const row = el('div'); row.style.cssText = 'display:flex;gap:14px;align-items:flex-end;justify-content:center';
+    const bh = Math.min(24, 220 / Math.max(1, ...x.teams.map(t => t.score)));
+    x.teams.forEach(t => {
+      const col = el('div'); col.style.textAlign = 'center';
+      for (let k = 0; k < t.score; k++) { const b = el('div', null, 'c' + t.team); b.style.cssText = 'width:64px;height:' + (bh - 2) + 'px;margin-top:2px;border-radius:3px'; col.append(b); }
+      col.append(el('div', t.name + ' ' + t.score)); row.append(col);
+    });
+    box.append(row);
+  } else if (x.type === 'land') {
+    box.append(el('h2', 'Hududlar'));
+    const g = el('div'); g.style.cssText = 'display:flex;flex-wrap:wrap;gap:3px';
+    for (let k = 0; k < x.total; k++) {
+      const on = k < x.cells.length, c = el('div', null, on ? 'c' + x.cells[k] : '');
+      c.style.cssText = 'width:20px;height:20px;border-radius:3px;' + (on ? '' : 'background:#ffffff22'); g.append(c);
+    }
+    box.append(g);
+  } else if (x.type === 'pyramid') {
+    box.append(el('h2', 'Piramida'));
+    x.teams.forEach(t => {
+      const r = el('div', null, 'bar c' + t.team); r.style.width = (12 + 88 * Math.min(1, t.prog / x.total)) + '%';
+      r.append(el('span', t.name + ': ' + t.prog + ' / ' + x.total + (t.prog >= x.total ? " (cho'qqi)" : ''))); box.append(r);
+    });
+  } else if (x.type === 'sub') {
+    box.append(el('h2', 'Suv osti kemasi'));
+    const r = el('div', null, 'bar c1'); r.style.width = Math.max(12, x.pct) + '%'; r.append(el('span', "Yoqilg'i: " + x.pct + '%'));
+    box.append(r, el('p', fin ? (x.pct >= 60 ? 'Kema xavfsiz joyga yetdi!' : "Yoqilg'i yetmadi, kema yetib bormadi") : 'Maqsad: kamida 60%'));
+  } else if (x.type === 'vote') {
+    box.append(el('h2', 'Sinf ovozi'), el('p', "Ko'pchilik javobi: " + (x.maj >= 0 ? LET[x.maj] : '-') + (x.ok ? " (to'g'ri)" : " (noto'g'ri)") + '. Sinf balli: ' + x.score + ' / ' + x.asked));
+  } else if (x.type === 'jumble') {
+    box.append(el('h2', "To'g'ri tartib"));
+    x.seq.forEach((t, k) => box.append(el('div', (k + 1) + '. ' + t, 'row')));
+    box.append(el('p', "To'g'ri: " + x.right + ' ta, xato: ' + x.wrong + ' ta'));
+  }
+}
+socket.on('results', r => {
+  clearInterval(tick); show('res');
+  const mx = Math.max(1, ...r.counts); $('bars').textContent = '';
+  r.counts.forEach((c, i) => {
+    const b = el('div', null, 'bar c' + i); b.append(SH(i), el('span', c + (i === r.correct ? " (to'g'ri)" : '')));
+    b.style.width = (15 + 85 * c / mx) + '%'; $('bars').append(b);
+  });
+  list($('board'), r.board.list); teamsView($('teams'), r.board.teams); drawExtra($('extra'), r.extra, false);
+  $('next').textContent = r.last ? 'Yakunlash' : 'Keyingi savol';
+});
+$('next').onclick = () => socket.emit('host:next');
+socket.on('end', b => { show('end'); list($('fboard'), b.list); teamsView($('fteams'), b.teams); drawExtra($('fextra'), b.extra, true); });
+</script></body></html>

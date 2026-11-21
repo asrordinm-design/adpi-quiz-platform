@@ -1,0 +1,81 @@
+<!doctype html><html lang="uz"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Talaba</title><link rel="stylesheet" href="style.css"></head>
+<body><main>
+<section id="s1">
+  <h1>O'yinga kirish</h1>
+  <input id="pin" inputmode="numeric" placeholder="PIN-kod">
+  <button id="chk">Davom etish</button>
+</section>
+<section id="s2" class="hide">
+  <h2 id="tp"></h2>
+  <input id="name" maxlength="20" placeholder="Ismingiz">
+  <button id="join">Kirish</button>
+</section>
+<section id="s3" class="hide">
+  <div id="tband" class="card hide" style="text-align:center;font-weight:700"></div>
+  <h2 id="msg"></h2><div class="grid" id="opts"></div><div class="big" id="info"></div>
+</section>
+<p id="err" class="warn" style="text-align:center"></p>
+</main>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const $ = id => document.getElementById(id), socket = io();
+const show = id => ['s1','s2','s3'].forEach(s => $(s).classList.toggle('hide', s !== id));
+const el = (t, txt, cls) => { const e = document.createElement(t); if (txt != null) e.textContent = txt; if (cls) e.className = cls; return e; };
+let pin;
+
+$('chk').onclick = () => {
+  pin = $('pin').value.trim();
+  socket.emit('player:check', pin, r => {
+    if (!r.ok) { $('err').textContent = "O'yin topilmadi yoki boshlangan"; return; }
+    $('err').textContent = ''; $('tp').textContent = r.topic || "O'yin"; show('s2');
+  });
+};
+$('join').onclick = () => {
+  socket.emit('player:join', { pin, name: $('name').value }, r => {
+    if (r.error) { $('err').textContent = r.error; return; }
+    $('err').textContent = ''; show('s3'); $('msg').textContent = "Kuting, o'qituvchi boshlaydi…";
+  });
+};
+socket.on('team', t => {
+  const b = $('tband'); b.className = 'card c' + t.team; b.textContent = 'Siz ' + t.name + ' guruhdasiz';
+  b.style.cssText = 'text-align:center;font-weight:700';
+});
+socket.on('question', q => {
+  $('info').textContent = ''; $('msg').textContent = (q.i + 1) + '/' + q.total + (q.jumble ? " — to'g'ri tartibda bosing" : '');
+  $('opts').textContent = ''; const seq = [];
+  q.options.forEach((t, i) => {
+    const b = el('button', null, 'ans c' + i), lab = el('div', 'ABCD'[i]);
+    b.append(el('span', null, 'shape sh' + i), lab);
+    b.onclick = () => {
+      if (q.jumble) {
+        seq.push(i); b.disabled = true; lab.textContent = seq.length;
+        if (seq.length === q.options.length) { socket.emit('player:answer', seq); $('msg').textContent = 'Javob yuborildi'; }
+        return;
+      }
+      socket.emit('player:answer', i);
+      [...$('opts').children].forEach(x => x.disabled = true);
+      b.classList.add('picked'); $('msg').textContent = 'Javob yuborildi';
+    };
+    $('opts').append(b);
+  });
+});
+function coins() {
+  const box = el('div'); box.style.cssText = 'position:relative;height:240px;grid-column:1/3'; let k = 0;
+  for (let i = 0; i < 5; i++) {
+    const c = el('button', '●');
+    c.style.cssText = 'position:absolute;width:58px;height:58px;border-radius:50%;padding:0;margin:0;left:' + Math.random() * 75 + '%;top:' + Math.random() * 75 + '%';
+    c.onclick = () => { k++; c.remove(); }; box.append(c);
+  }
+  $('opts').append(box);
+  setTimeout(() => { socket.emit('player:coins', k); box.remove(); }, 4000);
+}
+socket.on('result', r => {
+  $('opts').textContent = '';
+  $('msg').textContent = !r.answered ? 'Vaqt tugadi' : r.correct ? "To'g'ri!" + (r.coins ? ' Tangalarni tez bosing!' : '') : "Noto'g'ri";
+  $('info').textContent = '+' + r.points + '  |  Jami: ' + r.score;
+  if (r.coins) coins();
+});
+socket.on('bonus', r => { $('info').textContent += '  +' + r.points + ' tanga'; });
+socket.on('final', r => { $('opts').textContent = ''; $('msg').textContent = "O'yin tugadi! Siz " + r.rank + "-o'rindasiz"; $('info').textContent = 'Ball: ' + r.score; });
+socket.on('closed', () => { $('opts').textContent = ''; $('msg').textContent = "O'qituvchi o'yinni yopdi"; });
+</script></body></html>
